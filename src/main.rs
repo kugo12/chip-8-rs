@@ -23,22 +23,28 @@ const FONTS: [u8; 80] = [
 ];
 
 struct Chip8 {
-    memory: [u8; 4096],
-    register: [u8; 16],
-    i_register: u16,
-    delay_timer: u8,
-    sound_timer: u8,
+    mem: [u8; 4096],
+    reg: [u8; 16],
+    i_reg: u16,
+    pc: u16,  // program counter
+    sp: u8,  // stack pointer
+    stack: [u16; 16],
+    dt: u8,  // delay timer
+    st: u8,  // sound timer
     input: [bool; 16],
 }
 
 impl Chip8 {
     fn new() -> Chip8 {
         let mut c = Chip8 {
-            memory: [0; 4096],
-            register: [0; 16],
-            i_register: 0,
-            delay_timer: 0,
-            sound_timer: 0,
+            mem: [0; 4096],
+            reg: [0; 16],
+            i_reg: 0,
+            dt: 0,
+            st: 0,
+            pc: 0x200,
+            stack: [0; 16],
+            sp: 0,
             input: [false; 16]
         };
         c.load_fonts_to_mem();
@@ -47,7 +53,7 @@ impl Chip8 {
 
     fn load_fonts_to_mem(&mut self){
         for (i, byte) in FONTS.iter().enumerate(){
-            self.memory[i] = *byte;
+            self.mem[i] = *byte;
         }
     }
 
@@ -58,9 +64,15 @@ impl Chip8 {
         f.read(&mut buf)?;
         
         for (i, byte) in buf.iter().enumerate(){
-            self.memory[i + 0x200] = *byte;
+            self.mem[i + 0x200] = *byte;
         }
         Ok(())
+    }
+
+    fn get_instruction(&mut self) -> u16 {
+        let instruction = ((self.mem[self.pc as usize] as u16) << 8) | self.mem[(self.pc+1) as usize] as u16;
+        self.pc += 2;
+        instruction
     }
 }
 
