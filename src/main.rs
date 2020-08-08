@@ -1,3 +1,8 @@
+use std::fs::File;
+use std::io;
+use std::io::prelude::*;
+
+
 const FONTS: [u8; 80] = [
     0xf0, 0x90, 0x90, 0x90, 0xf0,  // 0
     0x20, 0x60, 0x20, 0x20, 0x70,  // 1
@@ -45,9 +50,21 @@ impl Chip8 {
             self.memory[i] = *byte;
         }
     }
+
+    fn load_file_to_mem(&mut self, path: &str) -> io::Result<()> {
+        let mut f = File::open(path)?;
+        let mut buf: [u8; 3584] = [0; 3584];
+
+        f.read(&mut buf)?;
+        
+        for (i, byte) in buf.iter().enumerate(){
+            self.memory[i + 0x200] = *byte;
+        }
+        Ok(())
+    }
 }
 
 
 fn main() {
-    let _c = Chip8::new();
+    let mut c = Chip8::new();
 }
