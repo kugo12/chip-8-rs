@@ -1,0 +1,8 @@
+[package]
+name = "chip-8-rs"
+version = "0.1.0"
+authors = ["Szczepan W"]
+edition = "2018"
+
+[dependencies]
+raylib = "1.0.1"
