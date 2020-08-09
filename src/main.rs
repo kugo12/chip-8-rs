@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::io;
 use std::io::prelude::*;
+use rand::random;
 
 
 const FONTS: [u8; 80] = [
@@ -71,11 +72,122 @@ impl OPCode {
         let op = OPCode::detect(instr, chip8);
         
         match op {
-            OPCode::LD(p, v) => unsafe{ p.write(v) },
+            OPCode::LD(p, v) => {
+                unsafe{ p.write(v) }
+            },
+            OPCode::LDI(addr) => {
+                chip8.i_reg = addr;
+            },
             OPCode::UNKNOWN(inst) => {
                 println!("Unknown instruction ({:x})", inst); 
                 return false;
             },
+            OPCode::RET => {
+                chip8.pc = chip8.stack[chip8.sp as usize];
+                chip8.sp -= 1;
+            },
+            OPCode::JMP(addr) => {
+                chip8.pc = addr;
+            },
+            OPCode::JMPV(addr) => {
+                chip8.pc = addr + (chip8.reg[0] as u16);
+            },
+            OPCode::CALL(addr) => {
+                chip8.sp += 1;
+                chip8.stack[chip8.sp as usize] = chip8.pc;
+                chip8.pc = addr;
+            },
+            OPCode::SE(x, y) => {
+                if x == y {
+                    chip8.pc += 2;
+                }
+            },
+            OPCode::SNE(x, y) => {
+                if x != y {
+                    chip8.pc += 2;
+                }
+            },
+            OPCode::ADDB(vx, byte) => {
+                chip8.reg[vx as usize] += byte;
+            },
+            OPCode::OR(vx, vy) => {
+                chip8.reg[vx as usize] |= chip8.reg[vy as usize];
+            },
+            OPCode::AND(vx, vy) => {
+                chip8.reg[vx as usize] &= chip8.reg[vy as usize];
+            },
+            OPCode::XOR(vx, vy) => {
+                chip8.reg[vx as usize] ^= chip8.reg[vy as usize];
+            },
+            OPCode::ADD(vx, vy) => {
+                let (val, carry) = chip8.reg[vx as usize].overflowing_add(chip8.reg[vy as usize]);
+                chip8.reg[vx as usize] = val;
+                chip8.reg[0xF] = carry as u8;
+            },
+            OPCode::SUB(vx, vy) => {
+                let (val, borrow) = chip8.reg[vx as usize].overflowing_sub(chip8.reg[vy as usize]);
+                chip8.reg[vx as usize] = val;
+                chip8.reg[0xF] = borrow as u8;
+            },
+            OPCode::SUBN(vx, vy) => {
+                let (val, borrow) = chip8.reg[vy as usize].overflowing_sub(chip8.reg[vx as usize]);
+                chip8.reg[vx as usize] = val;
+                chip8.reg[0xF] = borrow as u8;
+            },
+            OPCode::SHR(vx) => {
+                chip8.reg[0xF] = chip8.reg[vx as usize] & 0b00000001;
+                chip8.reg[vx as usize] >>= 1;
+            },
+            OPCode::SHL(vx) => {
+                chip8.reg[0xF] = (chip8.reg[vx as usize] & 0b10000000) >> 7;
+                chip8.reg[vx as usize] <<= 1;
+            },
+            OPCode::ADDI(vx) => {
+                chip8.i_reg += chip8.reg[vx as usize] as u16;
+            },
+            OPCode::LDF(ch) => {
+                chip8.i_reg = 5 * ch as u16;
+            },
+            OPCode::LDBCD(vx) => {
+                let mut vx = chip8.reg[vx as usize].clone();
+                let mut index: u16 = 3;
+                while index > 0 {
+                    index -= 1;
+                    chip8.mem[(chip8.i_reg + index) as usize] = vx % 10;
+                    vx /= 10;
+                }
+            },
+            OPCode::LDIR(vx) => {
+                let mut index: u8 = 0x0;
+
+                while index < vx + 1 {
+                    chip8.mem[(chip8.i_reg + index as u16) as usize] = chip8.reg[index as usize];
+                    index += 1;
+                }
+                chip8.i_reg += vx as u16 + 1;
+            },
+            OPCode::LDRI(vx) => {
+                let mut index: u8 = 0x0;
+
+                while index < vx + 1 {
+                    chip8.reg[index as usize] = chip8.mem[(chip8.i_reg + index as u16) as usize];
+                    index += 1;
+                }
+                chip8.i_reg += vx as u16 + 1;
+            },
+            OPCode::SKP(vx) => {
+                if chip8.input[chip8.reg[vx as usize] as usize] {
+                    chip8.pc += 2;
+                }
+            },
+            OPCode::SKNP(vx) => {
+                if !chip8.input[chip8.reg[vx as usize] as usize] {
+                    chip8.pc += 2;
+                }
+            },
+            OPCode::RND(vx, byte) => {
+                chip8.reg[vx as usize] = random::<u8>() & byte;
+            }
             _ => println!("{:?} not implemented yet", op),
         };
         true
@@ -215,6 +327,5 @@ fn main() -> io::Result<()> {
     while c.tick(){
         
     }
-
     Ok(())
 }
