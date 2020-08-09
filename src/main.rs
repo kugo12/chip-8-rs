@@ -33,7 +33,7 @@ fn get_pattern(pattern: u16, val: u16) -> u8 {
 }
 
 #[derive(Debug)]
-enum OPCode<'a> {
+enum OPCode {
     CLS,                // clear screen
     RET,                // return subroutine
     JMP(u16),           // jump to NNN
@@ -41,7 +41,7 @@ enum OPCode<'a> {
     CALL(u16),          // call subroutine at NNN
     SE(u8, u8),         // if equal skip next instruction
     SNE(u8, u8),        // if not equal skip next instruction
-    LD(&'a u8, u8),     // set Vx to Vy
+    LD(*mut u8, u8),    // set Vx to Vy
     LDI(u16),           // set I register to NNN
     LDRI(u8),           // read registers from V0 to Vx starting from I reg mem address
     LDIR(u8),           // store registers from V0 to Vx starting from I reg mem address
@@ -56,8 +56,8 @@ enum OPCode<'a> {
     OR(u8, u8),         // Vx |= Vy
     AND(u8, u8),        // Vx &= Vy
     XOR(u8, u8),        // Vx ^= Vy
-    SHR(u8),        // set VF to Vx LSb, Vx >>= 1
-    SHL(u8),        // set VF to Vx MSb, Vx <<= 1
+    SHR(u8),            // set VF to Vx LSb, Vx >>= 1
+    SHL(u8),            // set VF to Vx MSb, Vx <<= 1
     RND(u8, u8),        // Vx = random u8 & kk
     DRW(u8, u8, u8),    // draw sprite from I reg address, pos (Vx, Vy), n -> how long in bytes is sprite
     SKP(u8),            // if Vx key value is pressed skip next instruction
@@ -66,8 +66,22 @@ enum OPCode<'a> {
     UNKNOWN(u16)
 }
 
-impl OPCode<'_> {
-    fn detect<'a>(inst: u16, chip8: &'a Chip8) -> OPCode<'a> {
+impl OPCode {
+    fn run(instr: u16, chip8: &mut Chip8) -> bool {
+        let op = OPCode::detect(instr, chip8);
+        
+        match op {
+            OPCode::LD(p, v) => unsafe{ p.write(v) },
+            OPCode::UNKNOWN(inst) => {
+                println!("Unknown instruction ({:x})", inst); 
+                return false;
+            },
+            _ => println!("{:?} not implemented yet", op),
+        };
+        true
+    }
+
+    fn detect(inst: u16, chip8: &mut Chip8) -> OPCode {
         match inst & 0xF000 {
             0x0000 => {
                 match inst {
@@ -81,11 +95,11 @@ impl OPCode<'_> {
             0x3000 => OPCode::SE(chip8.reg[get_pattern(0x0f00, inst) as usize], get_pattern(0x00ff, inst)),
             0x4000 => OPCode::SNE(chip8.reg[get_pattern(0x0f00, inst) as usize], get_pattern(0x00ff, inst)),
             0x5000 => OPCode::SE(chip8.reg[get_pattern(0x0f00, inst) as usize], chip8.reg[get_pattern(0x00f0, inst) as usize]),
-            0x6000 => OPCode::LD(&chip8.reg[get_pattern(0x0f00, inst) as usize], get_pattern(0x00ff, inst)),
+            0x6000 => OPCode::LD(&mut chip8.reg[get_pattern(0x0f00, inst) as usize], get_pattern(0x00ff, inst)),
             0x7000 => OPCode::ADDB(get_pattern(0x0f00, inst), get_pattern(0x00ff, inst)),
             0x8000 => {
                 match inst & 0x000f {
-                    0x0000 => OPCode::LD(&chip8.reg[get_pattern(0x0f00, inst) as usize], chip8.reg[get_pattern(0x00f0, inst) as usize]),
+                    0x0000 => OPCode::LD(&mut chip8.reg[get_pattern(0x0f00, inst) as usize], chip8.reg[get_pattern(0x00f0, inst) as usize]),
                     0x0001 => OPCode::OR(get_pattern(0x0f00, inst), get_pattern(0x00f0, inst)),
                     0x0002 => OPCode::AND(get_pattern(0x0f00, inst), get_pattern(0x00f0, inst)),
                     0x0003 => OPCode::XOR(get_pattern(0x0f00, inst), get_pattern(0x00f0, inst)),
@@ -111,10 +125,10 @@ impl OPCode<'_> {
             },
             0xF000 => {
                 match inst & 0x00ff {
-                    0x0007 => OPCode::LD(&chip8.reg[get_pattern(0x0f00, inst) as usize], chip8.dt),
+                    0x0007 => OPCode::LD(&mut chip8.reg[get_pattern(0x0f00, inst) as usize], chip8.dt),
                     0x000a => OPCode::LDK(get_pattern(0x0f00, inst)),
-                    0x0015 => OPCode::LD(&chip8.dt, chip8.reg[get_pattern(0x0f00, inst) as usize]),
-                    0x0018 => OPCode::LD(&chip8.st, chip8.reg[get_pattern(0x0f00, inst) as usize]),
+                    0x0015 => OPCode::LD(&mut chip8.dt, chip8.reg[get_pattern(0x0f00, inst) as usize]),
+                    0x0018 => OPCode::LD(&mut chip8.st, chip8.reg[get_pattern(0x0f00, inst) as usize]),
                     0x001e => OPCode::ADDI(get_pattern(0x0f00, inst)),
                     0x0029 => OPCode::LDF(get_pattern(0x0f00, inst)),
                     0x0033 => OPCode::LDBCD(get_pattern(0x0f00, inst)),
@@ -175,14 +189,32 @@ impl Chip8 {
         Ok(())
     }
 
-    fn get_instruction(&mut self) -> u16 {
+    fn get_instruction(&mut self) -> Option<u16> {
         let instruction = ((self.mem[self.pc as usize] as u16) << 8) | self.mem[(self.pc+1) as usize] as u16;
-        self.pc += 2;
-        instruction
+        if instruction == 0x0000 {
+            None
+        } else {
+            self.pc += 2;
+            Some(instruction)
+        }
+    }
+
+    fn tick(&mut self) -> bool {
+        match self.get_instruction() {
+            Some(inst) => OPCode::run(inst, self),
+            None => false
+        }
     }
 }
 
 
-fn main() {
+fn main() -> io::Result<()> {
     let mut c = Chip8::new();
+    c.load_file_to_mem(&"pong.rom")?;
+
+    while c.tick(){
+        
+    }
+
+    Ok(())
 }
