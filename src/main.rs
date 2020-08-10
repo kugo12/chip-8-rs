@@ -187,6 +187,39 @@ impl OPCode {
             },
             OPCode::RND(vx, byte) => {
                 chip8.reg[vx as usize] = random::<u8>() & byte;
+            },
+            OPCode::CLS => {
+                chip8.screen = [0; 32*64];
+            },
+            OPCode::DRW(vx, vy, n) => {
+                let mut pos: u16 = {
+                    let vx = chip8.reg[vx as usize] as u16;
+                    let vy = chip8.reg[vy as usize] as u16;
+                    // print!("{0}, {1}", vx, vy);
+                    vx + vy*64
+                };
+                // print!(", {}\n", pos);
+
+                let mut sprite: u8;
+                let mut screen_slice: &mut [u8];
+                let mut index: u16 = 0;
+                let mut erased = false;
+                while (index as u8) < n + 1 {
+                    sprite = chip8.mem[(chip8.i_reg + index) as usize].clone().reverse_bits();
+
+                    screen_slice = &mut chip8.screen[pos as usize .. (pos + 8) as usize];
+                    for i in screen_slice.iter_mut() {
+                        if *i + (sprite % 2) == 2 { erased = true; }
+                        *i ^= sprite % 2;
+                        sprite /= 2;
+                    }
+
+                    index += 1;
+                    pos += 64;
+                }
+
+                chip8.reg[0xF] = erased as u8;
+                
             }
             _ => println!("{:?} not implemented yet", op),
         };
@@ -264,6 +297,7 @@ struct Chip8 {
     dt: u8,  // delay timer
     st: u8,  // sound timer
     input: [bool; 16],
+    screen: [u8; 32*64]
 }
 
 impl Chip8 {
@@ -277,7 +311,8 @@ impl Chip8 {
             pc: 0x200,
             stack: [0; 16],
             sp: 0,
-            input: [false; 16]
+            input: [false; 16],
+            screen: [0; 32*64]
         };
         c.load_fonts_to_mem();
         c
