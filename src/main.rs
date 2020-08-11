@@ -9,7 +9,7 @@ use hertz;
 use raylib::prelude::*;
 use std::cell::RefCell;
 
-
+const SCREEN_MULT: i32 = 6;
 const FONTS: [u8; 80] = [
     0xf0, 0x90, 0x90, 0x90, 0xf0,  // 0
     0x20, 0x60, 0x20, 0x20, 0x70,  // 1
@@ -211,10 +211,10 @@ impl OPCode {
                 let mut pos: u16 = {
                     let vx = chip8.reg[vx as usize] as u16;
                     let vy = chip8.reg[vy as usize] as u16;
-                    print!("{0}, {1}", vx, vy);
+                    // print!("{0}, {1}", vx, vy);
                     vx + vy*64
                 };
-                print!(", {}\n", pos);
+                // print!(", {}\n", pos);
 
                 let mut sprite: u8;
                 let mut screen_slice: &mut [u8];
@@ -392,7 +392,7 @@ impl Chip8 {
 
     async fn draw_loop(s: &RefCell<&mut Chip8>){
         let (mut rl, thread) = raylib::init()
-            .size(128, 64)
+            .size(64*SCREEN_MULT, 32*SCREEN_MULT)
             .title("CHIP-8 emulator")
             .build();
         
@@ -414,8 +414,8 @@ impl Chip8 {
                 }
                 for (i, p) in chip8.screen.iter().enumerate() {
                     if *p != 0 {
-                        let (x, y) = ((i/64)*2, (i%64)*2);
-                        d.draw_rectangle(y as i32, x as i32, 2, 2, Color::WHITE);
+                        let (x, y) = ((i as i32%64)*SCREEN_MULT, (i as i32/64)*SCREEN_MULT);
+                        d.draw_rectangle(x, y, SCREEN_MULT, SCREEN_MULT, Color::WHITE);
                     }
                 }
             }
