@@ -280,8 +280,8 @@ impl OPCode {
             0xD000 => OPCode::DRW(get_pattern(0x0f00, inst), get_pattern(0x00f0, inst), get_pattern(0x000f, inst)),
             0xE000 => {
                 match inst & 0x00ff {
-                    0x009e => OPCode::SKP(chip8.reg[get_pattern(0x0f00, inst) as usize]),
-                    0x00a1 => OPCode::SKNP(chip8.reg[get_pattern(0x0f00, inst) as usize]),
+                    0x009e => OPCode::SKP(get_pattern(0x0f00, inst)),
+                    0x00a1 => OPCode::SKNP(get_pattern(0x0f00, inst)),
                     _ => OPCode::UNKNOWN(inst)
                 }
             },
