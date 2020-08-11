@@ -7,3 +7,6 @@ edition = "2018"
 [dependencies]
 raylib = "1.0.1"
 rand = "0.7.3"
+async-std = "1.6.2"
+futures = "0.3.5"
+hertz = "0.3.0"

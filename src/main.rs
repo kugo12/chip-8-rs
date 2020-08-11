@@ -2,6 +2,12 @@ use std::fs::File;
 use std::io;
 use std::io::prelude::*;
 use rand::random;
+use std::time;
+use async_std;
+use futures;
+use hertz;
+use raylib::prelude::*;
+use std::cell::RefCell;
 
 
 const FONTS: [u8; 80] = [
@@ -22,6 +28,15 @@ const FONTS: [u8; 80] = [
     0xf0, 0x80, 0xf0, 0x80, 0xf0,  // E
     0xf0, 0x80, 0xf0, 0x80, 0x80   // F
 ];
+
+async fn sleep_for_constant_rate(fps: usize, instant_at_last_frame_start: time::Instant) {
+    let ns_per_frame = hertz::fps_to_ns_per_frame(fps);
+    let frame_duration = time::Duration::new(0, (ns_per_frame % 1000000000) as u32);
+    let elapsed = instant_at_last_frame_start.elapsed();
+    if elapsed < frame_duration {
+        async_std::task::sleep(frame_duration - elapsed).await;
+    }
+}
 
 fn get_pattern(pattern: u16, val: u16) -> u8 {
     let val = val & pattern;
@@ -108,7 +123,8 @@ impl OPCode {
                 }
             },
             OPCode::ADDB(vx, byte) => {
-                chip8.reg[vx as usize] += byte;
+                let (val, _carry) = chip8.reg[vx as usize].overflowing_add(byte);
+                chip8.reg[vx as usize] = val;
             },
             OPCode::OR(vx, vy) => {
                 chip8.reg[vx as usize] |= chip8.reg[vy as usize];
@@ -195,16 +211,16 @@ impl OPCode {
                 let mut pos: u16 = {
                     let vx = chip8.reg[vx as usize] as u16;
                     let vy = chip8.reg[vy as usize] as u16;
-                    // print!("{0}, {1}", vx, vy);
+                    print!("{0}, {1}", vx, vy);
                     vx + vy*64
                 };
-                // print!(", {}\n", pos);
+                print!(", {}\n", pos);
 
                 let mut sprite: u8;
                 let mut screen_slice: &mut [u8];
                 let mut index: u16 = 0;
                 let mut erased = false;
-                while (index as u8) < n + 1 {
+                while (index as u8) < n  {
                     sprite = chip8.mem[(chip8.i_reg + index) as usize].clone().reverse_bits();
 
                     screen_slice = &mut chip8.screen[pos as usize .. (pos + 8) as usize];
@@ -232,6 +248,7 @@ impl OPCode {
                 match inst {
                     0x00e0 => OPCode::CLS,
                     0x00ee => OPCode::RET,
+                    0x0000..=0x01ff => OPCode::UNKNOWN(inst),
                     _ => OPCode::JMP(inst & 0x0fff)
                 }
             },
@@ -297,7 +314,8 @@ struct Chip8 {
     dt: u8,  // delay timer
     st: u8,  // sound timer
     input: [bool; 16],
-    screen: [u8; 32*64]
+    screen: [u8; 32*64],
+    running: bool
 }
 
 impl Chip8 {
@@ -312,7 +330,8 @@ impl Chip8 {
             stack: [0; 16],
             sp: 0,
             input: [false; 16],
-            screen: [0; 32*64]
+            screen: [0; 32*64],
+            running: false
         };
         c.load_fonts_to_mem();
         c
@@ -352,6 +371,66 @@ impl Chip8 {
             None => false
         }
     }
+
+    async fn tick_loop(s: &RefCell<&mut Chip8>) {
+        loop {
+            let time = time::Instant::now();
+            {
+                let mut chip8 = s.borrow_mut();
+                if chip8.running {
+                    if !chip8.tick() {
+                        chip8.running = false;
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+            sleep_for_constant_rate(500, time).await;
+        }
+    }
+
+    async fn draw_loop(s: &RefCell<&mut Chip8>){
+        let (mut rl, thread) = raylib::init()
+            .size(128, 64)
+            .title("CHIP-8 emulator")
+            .build();
+        
+        while !rl.window_should_close() {
+            let time = time::Instant::now();
+            {
+                let mut d: raylib::core::drawing::RaylibDrawHandle = rl.begin_drawing(&thread);
+                d.clear_background(Color::BLACK);
+
+                let mut chip8 = s.borrow_mut();
+                if !chip8.running {
+                    break;
+                }
+                if chip8.dt > 0 {
+                    chip8.dt -= 1;
+                }
+                if chip8.st > 0 {
+                    chip8.st -= 1;
+                }
+                for (i, p) in chip8.screen.iter().enumerate() {
+                    if *p != 0 {
+                        let (x, y) = ((i/64)*2, (i%64)*2);
+                        d.draw_rectangle(y as i32, x as i32, 2, 2, Color::WHITE);
+                    }
+                }
+            }
+            sleep_for_constant_rate(60, time).await;
+        }
+        let mut chip8 = s.borrow_mut();
+        chip8.running = false;
+    }
+
+    async fn run(&mut self){
+        self.running = true;
+        let s = RefCell::new(self);
+
+        futures::join!(Chip8::draw_loop(&s), Chip8::tick_loop(&s));
+    }
 }
 
 
@@ -359,8 +438,6 @@ fn main() -> io::Result<()> {
     let mut c = Chip8::new();
     c.load_file_to_mem(&"pong.rom")?;
 
-    while c.tick(){
-        
-    }
+    futures::executor::block_on(c.run());
     Ok(())
 }
