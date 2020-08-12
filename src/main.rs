@@ -28,6 +28,7 @@ const FONTS: [u8; 80] = [
     0xf0, 0x80, 0xf0, 0x80, 0xf0,  // E
     0xf0, 0x80, 0xf0, 0x80, 0x80   // F
 ];
+const INPUT_MAP: [char; 16] = ['X', '1', '2', '3', 'Q', 'W', 'E', 'A', 'S', 'D', 'Z', 'C', '4', 'R', 'F', 'V'];
 
 async fn sleep_for_constant_rate(fps: usize, instant_at_last_frame_start: time::Instant) {
     let ns_per_frame = hertz::fps_to_ns_per_frame(fps);
@@ -36,6 +37,19 @@ async fn sleep_for_constant_rate(fps: usize, instant_at_last_frame_start: time::
     if elapsed < frame_duration {
         async_std::task::sleep(frame_duration - elapsed).await;
     }
+}
+
+fn get_specific_input(x: u8) -> bool {
+    unsafe { ffi::IsKeyDown(INPUT_MAP[x as usize] as u8 as i32) }
+}
+
+fn get_input() -> Option<u8> {
+    for (i, key) in INPUT_MAP.iter().enumerate() {
+        if unsafe { ffi::IsKeyDown(*key as u8 as i32) } {
+            return Some(i as u8);
+        }
+    }
+    None
 }
 
 fn get_pattern(pattern: u16, val: u16) -> u8 {
@@ -143,12 +157,12 @@ impl OPCode {
             OPCode::SUB(vx, vy) => {
                 let (val, borrow) = chip8.reg[vx as usize].overflowing_sub(chip8.reg[vy as usize]);
                 chip8.reg[vx as usize] = val;
-                chip8.reg[0xF] = borrow as u8;
+                chip8.reg[0xF] = !borrow as u8;
             },
             OPCode::SUBN(vx, vy) => {
                 let (val, borrow) = chip8.reg[vy as usize].overflowing_sub(chip8.reg[vx as usize]);
                 chip8.reg[vx as usize] = val;
-                chip8.reg[0xF] = borrow as u8;
+                chip8.reg[0xF] = !borrow as u8;
             },
             OPCode::SHR(vx) => {
                 chip8.reg[0xF] = chip8.reg[vx as usize] & 0b00000001;
@@ -180,7 +194,7 @@ impl OPCode {
                     chip8.mem[(chip8.i_reg + index as u16) as usize] = chip8.reg[index as usize];
                     index += 1;
                 }
-                chip8.i_reg += vx as u16 + 1;
+                // chip8.i_reg += vx as u16 + 1;
             },
             OPCode::LDRI(vx) => {
                 let mut index: u8 = 0x0;
@@ -189,16 +203,26 @@ impl OPCode {
                     chip8.reg[index as usize] = chip8.mem[(chip8.i_reg + index as u16) as usize];
                     index += 1;
                 }
-                chip8.i_reg += vx as u16 + 1;
+                // chip8.i_reg += vx as u16 + 1;
             },
             OPCode::SKP(vx) => {
-                if chip8.input[chip8.reg[vx as usize] as usize] {
+                if get_specific_input(chip8.reg[vx as usize]) {
                     chip8.pc += 2;
                 }
             },
             OPCode::SKNP(vx) => {
-                if !chip8.input[chip8.reg[vx as usize] as usize] {
+                if !get_specific_input(chip8.reg[vx as usize])  {
                     chip8.pc += 2;
+                }
+            },
+            OPCode::LDK(vx) => {
+                match get_input() {
+                    Some(i) => {
+                        chip8.reg[vx as usize] = i;
+                    },
+                    None => {
+                        chip8.pc -= 2;
+                    }
                 }
             },
             OPCode::RND(vx, byte) => {
@@ -212,7 +236,7 @@ impl OPCode {
                     let vx = chip8.reg[vx as usize] as u16;
                     let vy = chip8.reg[vy as usize] as u16;
                     // print!("{0}, {1}", vx, vy);
-                    vx + vy*64
+                    vx%64 + vy*64
                 };
                 // print!(", {}\n", pos);
 
@@ -220,10 +244,20 @@ impl OPCode {
                 let mut screen_slice: &mut [u8];
                 let mut index: u16 = 0;
                 let mut erased = false;
+                let mut off: u16 = 8;
                 while (index as u8) < n  {
                     sprite = chip8.mem[(chip8.i_reg + index) as usize].clone().reverse_bits();
 
-                    screen_slice = &mut chip8.screen[pos as usize .. (pos + 8) as usize];
+                    if pos > 2048 {
+                        pos = pos % 64;
+                    }
+                    if (pos%64) > 63 - 8 {
+                        off = 64 - pos%64;
+                    } else {
+                        off = 8;
+                    }
+
+                    screen_slice = &mut chip8.screen[pos as usize .. (pos + off) as usize];
                     for i in screen_slice.iter_mut() {
                         if *i + (sprite % 2) == 2 { erased = true; }
                         *i ^= sprite % 2;
@@ -237,7 +271,7 @@ impl OPCode {
                 chip8.reg[0xF] = erased as u8;
                 
             }
-            _ => println!("{:?} not implemented yet", op),
+            // _ => println!("{:?} not implemented yet", op),
         };
         true
     }
@@ -248,8 +282,9 @@ impl OPCode {
                 match inst {
                     0x00e0 => OPCode::CLS,
                     0x00ee => OPCode::RET,
-                    0x0000..=0x01ff => OPCode::UNKNOWN(inst),
-                    _ => OPCode::JMP(inst & 0x0fff)
+                    // 0x0000..=0x01ff => OPCode::UNKNOWN(inst),
+                    // _ => OPCode::JMP(inst & 0x0fff)
+                    _ => OPCode::UNKNOWN(inst)
                 }
             },
             0x1000 => OPCode::JMP(inst & 0x0fff),
@@ -313,7 +348,6 @@ struct Chip8 {
     stack: [u16; 16],
     dt: u8,  // delay timer
     st: u8,  // sound timer
-    input: [bool; 16],
     screen: [u8; 32*64],
     running: bool
 }
@@ -329,7 +363,6 @@ impl Chip8 {
             pc: 0x200,
             stack: [0; 16],
             sp: 0,
-            input: [false; 16],
             screen: [0; 32*64],
             running: false
         };
@@ -406,12 +439,14 @@ impl Chip8 {
                 if !chip8.running {
                     break;
                 }
+
                 if chip8.dt > 0 {
                     chip8.dt -= 1;
                 }
                 if chip8.st > 0 {
                     chip8.st -= 1;
                 }
+
                 for (i, p) in chip8.screen.iter().enumerate() {
                     if *p != 0 {
                         let (x, y) = ((i as i32%64)*SCREEN_MULT, (i as i32/64)*SCREEN_MULT);
@@ -436,7 +471,7 @@ impl Chip8 {
 
 fn main() -> io::Result<()> {
     let mut c = Chip8::new();
-    c.load_file_to_mem(&"pong.rom")?;
+    c.load_file_to_mem(&"dttest.ch8")?;
 
     futures::executor::block_on(c.run());
     Ok(())
