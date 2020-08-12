@@ -423,11 +423,14 @@ impl Chip8 {
         }
     }
 
-    async fn draw_loop(s: &RefCell<&mut Chip8>){
+    async fn draw_loop(s: &RefCell<&mut Chip8>) -> Result<(), String>{
         let (mut rl, thread) = raylib::init()
             .size(64*SCREEN_MULT, 32*SCREEN_MULT)
             .title("CHIP-8 emulator")
             .build();
+
+        let sound = audio::Sound::load_sound(&"500.wav")?;
+        let mut raudio = RaylibAudio::init_audio_device();
         
         while !rl.window_should_close() {
             let time = time::Instant::now();
@@ -445,6 +448,13 @@ impl Chip8 {
                 }
                 if chip8.st > 0 {
                     chip8.st -= 1;
+                    if !raudio.is_sound_playing(&sound){
+                        raudio.play_sound(&sound);
+                    }
+                } else {
+                    if raudio.is_sound_playing(&sound) {
+                        raudio.stop_sound(&sound);
+                    }
                 }
 
                 for (i, p) in chip8.screen.iter().enumerate() {
@@ -458,6 +468,8 @@ impl Chip8 {
         }
         let mut chip8 = s.borrow_mut();
         chip8.running = false;
+
+        Ok(())
     }
 
     async fn run(&mut self){
@@ -471,7 +483,7 @@ impl Chip8 {
 
 fn main() -> io::Result<()> {
     let mut c = Chip8::new();
-    c.load_file_to_mem(&"dttest.ch8")?;
+    c.load_file_to_mem(&"pong.rom")?;
 
     futures::executor::block_on(c.run());
     Ok(())
